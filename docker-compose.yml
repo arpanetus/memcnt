@@ -1,0 +1,8 @@
+version: '3'
+
+services:
+  memcnt:
+    build: .
+    env_file:
+      - .env
+    restart: always
