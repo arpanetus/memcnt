@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
-	tg "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
+
+	tg "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 func errPrint(s error) {
@@ -22,39 +25,19 @@ func getNum(bot *tg.BotAPI, cfg tg.ChatConfig) (int, bool) {
 	return num, true
 }
 
-func main() {
-	chanId, err := strconv.ParseInt(os.Getenv("CHANNEL_ID"), 10, 64)
-	if err != nil {
-		errPrint(fmt.Errorf("cannot parse the channel_id: %w", err))
-		panic(err)
-	}
-
-	chanPfx := os.Getenv("CHANNEL_PREFIX")
-
-	bot, err := tg.NewBotAPI(os.Getenv("TELEGRAM_API_TOKEN"))
-	if err != nil {
-		errPrint(fmt.Errorf("cannot initiate bot client: %w", err))
-		panic(err)
-	}
-
-	bot.Debug = true
-
-	chatCfg := tg.ChatConfig{ChatID: chanId}
-
-	chat, err := bot.GetChat(tg.ChatInfoConfig{ChatConfig: chatCfg})
-	if err != nil {
-		errPrint(fmt.Errorf("cannot get chat: %w", err))
-		panic(err)
-	}
-	log.Printf("[INFO]: init the chat{%s} with title{%s}", chat.UserName, chat.Title)
-
-	prevNum, _ := getNum(bot, chatCfg)
+func titleUpdateRoutine(
+	bot *tg.BotAPI, 
+	cfg tg.ChatConfig, 
+	chanPfx string,
+	dur time.Duration,
+) {
+	prevNum, _ := getNum(bot, cfg)
 
 	for {
-		time.Sleep(time.Second * 30)
+		time.Sleep(dur)
 		func() {
 			log.Printf("[INFO]: starting the title update process")
-			num, ok := getNum(bot, chatCfg)
+			num, ok := getNum(bot, cfg)
 			if !ok {
 				return
 			}
@@ -65,7 +48,7 @@ func main() {
 
 			prevNum = num
 			newName := chanPfx + strconv.Itoa(prevNum)
-			setName := tg.SetChatTitleConfig{ChatID: chatCfg.ChatID, Title: newName}
+			setName := tg.SetChatTitleConfig{ChatID: cfg.ChatID, Title: newName}
 
 			resp, err := bot.Request(setName)
 			if err != nil {
@@ -73,11 +56,121 @@ func main() {
 				return
 			}
 			if string(resp.Result) != "true" {
-				errPrint(fmt.Errorf("tried to delete the prev msg but false was the reply", err))
+				errPrint(fmt.Errorf("tried to change the channel title msg but false was the reply"))
 				return
 			}
 			log.Printf("[MSG] changed name to: %s\n", newName)
 		}()
 	}
+}
 
+func handleTitleUpdate(bot *tg.BotAPI, update *tg.Update) {
+	if c:=update.ChannelPost; c!=nil && c.NewChatTitle != "" { 
+	
+		m, err := bot.Send(tg.NewDeleteMessage(update.ChannelPost.Chat.ID, update.ChannelPost.MessageID)) 
+		if err!=nil {
+			errPrint(fmt.Errorf("cannot delete the new title msg: %w", err))
+		} else {
+			log.Printf("[INFO]: deleted the older title: %v\n", m)
+		}	
+	}
+}
+
+func removeTitleUpdMsgs(bot *tg.BotAPI, baseUrl string, isWh bool) {
+	if isWh {
+		u, err := url.Parse(baseUrl)
+		if err!=nil {
+			errPrint(fmt.Errorf("cannot parse the url: %w", err))
+			panic(err)
+		}
+		u.Path = bot.Token
+
+		m, err := bot.Send(tg.WebhookConfig{URL: u})
+		if err != nil {
+			errPrint(fmt.Errorf("cannot send webhook: %w", err))
+			panic(err)
+		}
+		log.Printf("[INFO]: sent webhook: %s\n", m.Text)
+
+		info, err := bot.GetWebhookInfo()
+		if err != nil {
+			errPrint(fmt.Errorf("cannot get webhook info: %w", err))
+			panic(err)
+		}
+		if info.LastErrorDate != 0 {
+			errPrint(fmt.Errorf("webhook info has last error date: %d", info.LastErrorDate))
+			panic(err)
+		}
+
+		updates := bot.ListenForWebhook("/"+bot.Token)	
+		
+		go http.ListenAndServe("0.0.0.0:8080", nil)
+
+		for update := range updates {
+			handleTitleUpdate(bot, &update)
+		}
+
+	} else {
+		u := tg.NewUpdate(0)
+		u.Timeout = 60
+	
+		updates := bot.GetUpdatesChan(u)
+		
+		for update := range updates {
+			handleTitleUpdate(bot, &update)
+		}
+	}
+
+}
+
+var (
+	CHANNEL_ID_STR = "CHANNEL_ID"
+	CHANNEL_PREFIX = "CHANNEL_PREFIX"
+	TELEGRAM_API_TOKEN = "TELEGRAM_API_TOKEN"
+	BASE_URL = "BASE_URL"
+	IS_WEBHOOKED = "IS_WEBHOOKED"
+	CHECK_GETMEMNUM_DUR = "CHECK_GETMEMNUM_DUR"
+)
+
+func main() {
+	chanId, err := strconv.ParseInt(os.Getenv(CHANNEL_ID_STR), 10, 64)
+	if err != nil {
+		errPrint(fmt.Errorf("cannot parse the channel_id: %w", err))
+		panic(err)
+	}
+
+	chanPfx := os.Getenv(CHANNEL_PREFIX)
+
+	token := os.Getenv(TELEGRAM_API_TOKEN)
+
+	bot, err := tg.NewBotAPI(token)
+	if err != nil {
+		errPrint(fmt.Errorf("cannot initiate bot client: %w", err))
+		panic(err)
+	}
+
+	baseUrl := os.Getenv(BASE_URL)
+	isWh := os.Getenv(IS_WEBHOOKED)!="0"
+	
+	tmpDur, err := strconv.Atoi(os.Getenv(CHECK_GETMEMNUM_DUR))
+	if err!=nil {
+		errPrint(fmt.Errorf("cannot parse the check duration: %w", err))
+		panic(err)
+	}
+	dur := time.Millisecond * time.Duration(tmpDur)
+	
+	bot.Debug = true
+	
+	chatCfg := tg.ChatConfig{ChatID: chanId}
+
+	chat, err := bot.GetChat(tg.ChatInfoConfig{ChatConfig: chatCfg})
+	if err != nil {
+		errPrint(fmt.Errorf("cannot get chat: %w", err))
+		panic(err)
+	}
+	log.Printf("[INFO]: init the chat{%s} with title{%s}", chat.UserName, chat.Title)
+	
+	go titleUpdateRoutine(bot, chatCfg, chanPfx, dur)
+
+	removeTitleUpdMsgs(bot, baseUrl, isWh)
 }

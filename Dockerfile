@@ -16,4 +16,5 @@ WORKDIR /memcnt
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /bin/memcnt /memcnt/memcnt
 
+EXPOSE 8080
 ENTRYPOINT ["/memcnt/memcnt"]
