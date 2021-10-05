@@ -77,7 +77,7 @@ func handleTitleUpdate(bot *tg.BotAPI, update *tg.Update) {
 		if err!=nil {
 			errPrint(fmt.Errorf("cannot delete the new title msg: %w", err))
 		} else {
-			log.Printf("[INFO]: deleted the older title: %v\n", m)
+			log.Printf("[INFO]: deleted the older title: %s\n", string(m.Result))
 		}	
 	}
 }
@@ -94,7 +94,7 @@ func removeTitleUpdMsgs(bot *tg.BotAPI, baseUrl string, isWh bool, dur time.Dura
 			errPrint(fmt.Errorf("cannot delete the webhook: %w", err))
 			panic(err)
 		}
-		log.Printf("[INFO]: successfully deleted the webhook: %s", string(r.Result))
+		log.Printf("[INFO]: successfully deleted the webhook: %s\n", string(r.Result))
 
 		u, err := url.Parse(baseUrl)
 		if err!=nil {
@@ -103,12 +103,12 @@ func removeTitleUpdMsgs(bot *tg.BotAPI, baseUrl string, isWh bool, dur time.Dura
 		}
 		u.Path = bot.Token
 
-		m, err := bot.Send(tg.WebhookConfig{URL: u})
+		m, err := bot.Request(tg.WebhookConfig{URL: u})
 		if err != nil {
 			errPrint(fmt.Errorf("cannot send webhook: %w", err))
 			panic(err)
 		}
-		log.Printf("[INFO]: sent webhook: %s\n", m.Text)
+		log.Printf("[INFO]: sent webhook: %s\n", string(m.Result))
 
 		info, err := bot.GetWebhookInfo()
 		if err != nil {
