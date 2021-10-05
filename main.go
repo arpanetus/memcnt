@@ -30,19 +30,25 @@ func titleUpdateRoutine(
 	cfg tg.ChatConfig, 
 	chanPfx string,
 	dur time.Duration,
+	isDebug bool,
 ) {
-	prevNum, _ := getNum(bot, cfg)
+	var prevNum int
 
 	for {
 		time.Sleep(dur)
 		func() {
-			log.Printf("[INFO]: starting the title update process")
+			if isDebug {
+				log.Printf("[INFO]: starting the title update process")
+			}
+			
 			num, ok := getNum(bot, cfg)
 			if !ok {
 				return
 			}
 			if num == prevNum {
-				log.Printf("[INFO]: num didn't change")
+				if isDebug {
+					log.Printf("[INFO]: num didn't change")
+				}
 				return
 			}
 
@@ -67,7 +73,7 @@ func titleUpdateRoutine(
 func handleTitleUpdate(bot *tg.BotAPI, update *tg.Update) {
 	if c:=update.ChannelPost; c!=nil && c.NewChatTitle != "" { 
 	
-		m, err := bot.Send(tg.NewDeleteMessage(update.ChannelPost.Chat.ID, update.ChannelPost.MessageID)) 
+		m, err := bot.Request(tg.NewDeleteMessage(update.ChannelPost.Chat.ID, update.ChannelPost.MessageID)) 
 		if err!=nil {
 			errPrint(fmt.Errorf("cannot delete the new title msg: %w", err))
 		} else {
@@ -76,8 +82,20 @@ func handleTitleUpdate(bot *tg.BotAPI, update *tg.Update) {
 	}
 }
 
-func removeTitleUpdMsgs(bot *tg.BotAPI, baseUrl string, isWh bool) {
+func removeTitleUpdMsgs(bot *tg.BotAPI, baseUrl string, isWh bool, dur time.Duration) {
+	updCfg := tg.NewUpdate(0)
+	updCfg.Timeout = int(dur.Seconds())
+
 	if isWh {
+		d := tg.DeleteWebhookConfig{DropPendingUpdates: false}
+
+		r, err := bot.Request(d)
+		if err!=nil {
+			errPrint(fmt.Errorf("cannot delete the webhook: %w", err))
+			panic(err)
+		}
+		log.Printf("[INFO]: successfully deleted the webhook: %s", string(r.Result))
+
 		u, err := url.Parse(baseUrl)
 		if err!=nil {
 			errPrint(fmt.Errorf("cannot parse the url: %w", err))
@@ -110,11 +128,8 @@ func removeTitleUpdMsgs(bot *tg.BotAPI, baseUrl string, isWh bool) {
 			handleTitleUpdate(bot, &update)
 		}
 
-	} else {
-		u := tg.NewUpdate(0)
-		u.Timeout = 60
-	
-		updates := bot.GetUpdatesChan(u)
+	} else {	
+		updates := bot.GetUpdatesChan(updCfg)
 		
 		for update := range updates {
 			handleTitleUpdate(bot, &update)
@@ -130,6 +145,7 @@ var (
 	BASE_URL = "BASE_URL"
 	IS_WEBHOOKED = "IS_WEBHOOKED"
 	CHECK_GETMEMNUM_DUR = "CHECK_GETMEMNUM_DUR"
+	IS_DEBUG = "IS_DEBUG"
 )
 
 func main() {
@@ -151,6 +167,7 @@ func main() {
 
 	baseUrl := os.Getenv(BASE_URL)
 	isWh := os.Getenv(IS_WEBHOOKED)!="0"
+	isDebug := os.Getenv(IS_DEBUG)!="0"
 	
 	tmpDur, err := strconv.Atoi(os.Getenv(CHECK_GETMEMNUM_DUR))
 	if err!=nil {
@@ -159,7 +176,7 @@ func main() {
 	}
 	dur := time.Millisecond * time.Duration(tmpDur)
 	
-	bot.Debug = true
+	bot.Debug = isDebug
 	
 	chatCfg := tg.ChatConfig{ChatID: chanId}
 
@@ -170,7 +187,7 @@ func main() {
 	}
 	log.Printf("[INFO]: init the chat{%s} with title{%s}", chat.UserName, chat.Title)
 	
-	go titleUpdateRoutine(bot, chatCfg, chanPfx, dur)
+	go titleUpdateRoutine(bot, chatCfg, chanPfx, dur, isDebug)
 
-	removeTitleUpdMsgs(bot, baseUrl, isWh)
+	removeTitleUpdMsgs(bot, baseUrl, isWh, dur)
 }

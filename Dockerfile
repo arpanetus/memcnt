@@ -4,7 +4,7 @@ RUN apk update && apk add --no-cache git
 
 WORKDIR $GOPATH/src/github.com/arpanetus/memcnt
 
-COPY . .
+COPY go.mod go.sum main.go ./
 
 ENV CGO_ENABLED=0
 
